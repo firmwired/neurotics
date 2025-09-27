@@ -13,25 +13,29 @@ int lif_step(int *u, int I, int u_th, int u_rest, int tau) {
 
 int main() {
     stdio_init_all();
-    int u_th = 20, u_rest = 0, u = u_rest, tau = 50;
+    int u_th = 20, u_rest = 0, u = u_rest, u2 = u_rest, tau = 50;
     int led = 25;
+    int t = 0;
+    int iter = 20;
     gpio_init(led);
     gpio_set_dir(led, GPIO_OUT);
 
-    int t = 0;
-    printf("time,u,spike\n"); // CSV header
+    printf("time,u,spike1,spike2\n"); // CSV header
 
-    while (true) {
-        int I = (rand() % 100 < 50) ? 10 : 0; // Poisson input
-        int spike = lif_step(&u, I, u_th, u_rest, tau);
+    while (iter > 0) {
+        int I1 = (rand() % 100 < 50) ? 10 : 0; // Poisson input
+        int I2 = (rand() % 100 < 50) ? 10 : 0; // Poisson input
+        int spike1 = lif_step(&u, I1, u_th, u_rest, tau);
+        int spike2 = lif_step(&u2, I2, u_th, u_rest, tau);
 
-        if (spike) {
+        if (spike1 & spike2) {
             gpio_put(led, 1);
             sleep_ms(50);
             gpio_put(led, 0);
+            iter--;
         }
 
-        printf("%d,%d,%d\n", t, u, spike); // CSV row
+        printf("%d,%d,%d,%d\n", t, u, spike1, spike2); // CSV row
         t++;
         sleep_ms(100);
     }
