@@ -52,6 +52,5 @@ target_link_libraries(neurotics
 target_include_directories(neurotics PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
-
 pico_add_extra_outputs(neurotics)
 
