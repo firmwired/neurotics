@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Top-down car game / simulation (pygame).
 - Place a 'car.png' sprite (top-down view, pointing up) in the same folder to use it.
@@ -8,8 +7,10 @@ Top-down car game / simulation (pygame).
     LEFT / A  : steer left
     RIGHT / D : steer right
     R         : reset
-    ESC / Q   : quit
+    ESC / A   : quit
 - The world contains circular obstacles and a goal marker; reaching the goal wins the level.
+
+85% of the code was written by ChatGPT-4, with some modifications by firmwired (Game development isnt really my thing).
 """
 
 import pygame
@@ -20,13 +21,13 @@ import random
 
 # ----- PARAMETERS -----
 SCREEN_W, SCREEN_H = 800, 800
-WORLD_SIZE = 2.0  # conceptual world meters (for scaling if needed)
+WORLD_SIZE = 4.0  # conceptual world meters (for scaling if needed)
 FPS = 60
 
 CAR_SPRITE = "car.png"  # put your top-down car sprite here (pointing up)
 USE_SPRITE = os.path.exists(CAR_SPRITE)
 
-# Car physical parameters (feel free to tweak)
+# Car physical parameters 
 MAX_SPEED = 2.5        # m/s (conceptual)
 ACCEL = 4.0            # m/s^2
 BRAKE = 6.0
@@ -47,7 +48,7 @@ NUM_OBSTACLES = 6
 OBSTACLE_RADIUS_MIN = 0.04
 OBSTACLE_RADIUS_MAX = 0.12
 
-# Goal
+# Goal to reach
 GOAL_POS = (1.9, 1.0)  # world coords
 GOAL_RADIUS = 0.06
 
@@ -59,21 +60,16 @@ COLOR_GOAL = (32, 200, 60)
 COLOR_TEXT = (230, 230, 230)
 COLOR_CAR_BOX = (80, 160, 240)
 
+# Start position (x, y)
+START_POS = (0.05, 1.0)  
+
+# Tolerance margin  (how far the obstacles should be from start/goal to prevent immediate collision) 
+OBSTACLE_TOLERANCE = 0.03
 # -----------------------
 
-def world_to_screen(x, y):
-    """Map world coords (0..WORLD_SIZE) to screen pixels"""
-    sx = MARGIN + (x / WORLD_SIZE) * FIELD_W
-    sy = MARGIN + ((WORLD_SIZE - y) / WORLD_SIZE) * FIELD_H  # flip y for screen
-    return int(sx), int(sy)
-
-def screen_to_world(sx, sy):
-    x = (sx - MARGIN) / FIELD_W * WORLD_SIZE
-    y = WORLD_SIZE - (sy - MARGIN) / FIELD_H * WORLD_SIZE
-    return x, y
 
 class Car:
-    def __init__(self, x=0.05, y=1.0, theta=0.0):
+    def __init__(self, x=START_POS[0], y=START_POS[1], theta=0.0):
         self.x = x
         self.y = y
         self.theta = theta  # radians, 0 = right, but our sprite faces up; we'll rotate accordingly
@@ -144,16 +140,6 @@ class Car:
                 pts.append(world_to_screen(wx, wy))
             pygame.draw.polygon(surf, COLOR_CAR_BOX, pts)
 
-def generate_obstacles(seed=None):
-    rng = random.Random(seed)
-    obs = []
-    for _ in range(NUM_OBSTACLES):
-        x = rng.uniform(0.12, WORLD_SIZE - 0.12)
-        y = rng.uniform(0.12, WORLD_SIZE - 0.12)
-        r = rng.uniform(OBSTACLE_RADIUS_MIN, OBSTACLE_RADIUS_MAX)
-        obs.append((x,y,r))
-    # optionally ensure none overlap start/goal too closely
-    return obs
 
 def check_collision(car, obstacles):
     # approximate collision if car center within obstacle radius + car radius
@@ -214,7 +200,7 @@ def main():
                     obstacles = generate_obstacles(seed=random.randint(0,9999))
                     win = False; collision = False
                 elif event.key in (pygame.K_SPACE,):
-                    car.v = 0.0
+                    car.v = downgrade_v_to_0(car.v, int(FPS*0.2))  # quickly reduce speed to 0
                 # mark keys
                 if event.key in (pygame.K_UP, pygame.K_z):
                     key_state['up'] = True
@@ -296,6 +282,77 @@ def main():
 
     pygame.quit()
     sys.exit()
+
+
+
+
+# Helper functions
+def downgrade_v_to_0(v, dt):
+    """Helper to apply drag to velocity"""
+    v_new = 0.0
+    for _ in range(dt):
+        v -= v * DRAG
+    return v
+
+def world_to_screen(x, y):
+    """Map world coords (0..WORLD_SIZE) to screen pixels"""
+    sx = MARGIN + (x / WORLD_SIZE) * FIELD_W
+    sy = MARGIN + ((WORLD_SIZE - y) / WORLD_SIZE) * FIELD_H  # flip y for screen
+    return int(sx), int(sy)
+
+def screen_to_world(sx, sy):
+    x = (sx - MARGIN) / FIELD_W * WORLD_SIZE
+    y = WORLD_SIZE - (sy - MARGIN) / FIELD_H * WORLD_SIZE
+    return x, y
+
+
+def generate_obstacles(seed=None):
+    rng = random.Random(seed)
+    obs = []
+    max_attempts = 1000
+    attempts = 0
+    while len(obs) < NUM_OBSTACLES and attempts < max_attempts:
+        x = rng.uniform(0.12, WORLD_SIZE - 0.12)
+        y = rng.uniform(0.12, WORLD_SIZE - 0.12)
+        r = rng.uniform(OBSTACLE_RADIUS_MIN, OBSTACLE_RADIUS_MAX)
+        # Avoid placing obstacle too close to start or goal
+        too_close = False
+        for px, py in [START_POS, GOAL_POS]:
+            dist = math.hypot(x - px, y - py)
+            if dist < r + GOAL_RADIUS + OBSTACLE_TOLERANCE:
+                too_close = True
+                break
+        # Avoid placing obstacle directly in front of start  
+        if not too_close:
+            sx, sy = START_POS
+            dx, dy = x - sx, y - sy
+            angle = math.atan2(dy, dx)
+            start_theta = 0.0  # car faces right (0 radians)
+            angle_diff = abs((angle - start_theta + math.pi) % (2*math.pi) - math.pi)
+            if dx > 0 and angle_diff < math.radians(30) and math.hypot(dx, dy) < 0.4:
+                too_close = True
+        # Avoid forming a ring around the goal (no more than 3 obstacles within a ring)
+        if not too_close:
+            gx, gy = GOAL_POS
+            dist_goal = math.hypot(x - gx, y - gy)
+            ring_min = GOAL_RADIUS + 0.03
+            ring_max = GOAL_RADIUS + 0.13
+            count_in_ring = sum(1 for ox, oy, orad in obs if ring_min < math.hypot(ox - gx, oy - gy) < ring_max)
+            if ring_min < dist_goal < ring_max and count_in_ring >= 3:
+                too_close = True
+        # Avoid overlapping with other obstacles
+        if not too_close:
+            for ox, oy, orad in obs:
+                if math.hypot(x - ox, y - oy) < r + orad + OBSTACLE_TOLERANCE:
+                    too_close = True
+                    break
+        if not too_close:
+            obs.append((x, y, r))
+        attempts += 1
+    return obs
+
+# -------------------------------------------------------------
+
 
 if __name__ == "__main__":
     main()
